@@ -1,100 +1,58 @@
 // ==UserScript==
-// @name         哪吒详情页-只看网络图表
-// @version      2.1
-// @description  隐藏详情图表，直接展示网络波动卡片（适配新版HTML结构）
-// @author       Modified by Gemini
+// @name         哪吒详情页-极简网络视图
+// @version      3.0
+// @description  强制隐藏详情，只留网络波动图表
+// @author       Gemini
+// @match        *://*/server/* // @grant        GM_addStyle
 // ==/UserScript==
 
 (function () {
     'use strict';
 
-    // "网络" 按钮选择器
-    const selectorNetworkButton = '.server-info-tab .relative.cursor-pointer.text-stone-400.dark\\:text-stone-500';
+    // 1. 注入强制 CSS：直接从底层封死“详情图表”和“切换栏”
+    // .server-charts 是详情图表的特征类名
+    const style = `
+        /* 隐藏切换标签栏 */
+        .server-info section.flex.items-center.my-2.w-full { display: none !important; }
+        
+        /* 隐藏包含详情图表的容器 */
+        div:has(> .server-charts) { display: none !important; }
+        
+        /* 确保网络图表容器可见 */
+        .server-info > div:nth-last-child(1) { display: block !important; }
+    `;
+    
+    const styleTag = document.createElement('style');
+    styleTag.innerHTML = style;
+    document.head.appendChild(styleTag);
 
-    // Tab 切换区域的 section 选择器
-    const selectorTabSection = '.server-info section.flex.items-center.my-2.w-full';
-
-    // 详情图表视图（CPU/内存/磁盘等）
-    const selectorDetailCharts = '.server-info > div:has(.server-charts)';
-
-    // 网络图表视图
-    const selectorNetworkCharts = '.server-info > div:nth-of-type(3)';
-
-    let hasClicked = false;
-    let divVisible = false;
-
-    // 核心修改：强制隐藏详情，只显网络
-    function forceOnlyNetworkVisible() {
-        const detailDiv = document.querySelector(selectorDetailCharts);
-        const networkDiv = document.querySelector(selectorNetworkCharts);
-
-        if (detailDiv) {
-            detailDiv.style.setProperty('display', 'none', 'important'); // 强制隐藏详情
-            console.log('[UserScript] 详情图表已隐藏');
-        }
-        if (networkDiv) {
-            networkDiv.style.setProperty('display', 'block', 'important'); // 强制显示网络
-            console.log('[UserScript] 网络图表已显示');
-        }
-    }
-
-    function hideTabSection() {
-        const section = document.querySelector(selectorTabSection);
-        if (section) {
-            section.style.display = 'none';
-        }
-    }
-
-    function tryClickNetworkButton() {
-        const btn = document.querySelector(selectorNetworkButton);
-        if (btn && !hasClicked) {
-            btn.click();
-            hasClicked = true;
-            console.log('[UserScript] 已切换至网络标签');
-            // 切换后立即执行一次显示逻辑
-            setTimeout(forceOnlyNetworkVisible, 50);
-        }
-    }
-
-    function tryClickPeak(retryCount = 10, interval = 200) {
-        const peakBtn = document.querySelector('#Peak');
-        if (peakBtn) {
-            peakBtn.click();
-            console.log('[UserScript] 已点击 Peak 按钮');
-        } else if (retryCount > 0) {
-            setTimeout(() => tryClickPeak(retryCount - 1, interval), interval);
-        }
-    }
-
-    const observer = new MutationObserver(() => {
-        const detailDiv = document.querySelector(selectorDetailCharts);
-        const networkDiv = document.querySelector(selectorNetworkCharts);
-
-        const isAnyDivPresent = detailDiv || networkDiv;
-
-        if (isAnyDivPresent && !divVisible) {
-            hideTabSection();
-            tryClickNetworkButton();
-            setTimeout(() => tryClickPeak(15, 200), 300);
-        } else if (!isAnyDivPresent && divVisible) {
-            hasClicked = false;
-        }
-
-        divVisible = !!isAnyDivPresent;
-
-        // 持续检测确保视图状态正确
-        if (detailDiv || networkDiv) {
-             forceOnlyNetworkVisible();
-        }
-    });
-
-    const root = document.querySelector('#root');
-    if (root) {
-        observer.observe(root, {
-            childList: true,
-            attributes: true,
-            subtree: true,
-            attributeFilter: ['style', 'class']
+    // 2. 自动点击逻辑
+    function initializeView() {
+        // 寻找包含“网络”字样的按钮并点击
+        const buttons = document.querySelectorAll('.server-info-tab .relative.cursor-pointer');
+        buttons.forEach(btn => {
+            if (btn.textContent.includes('网络')) {
+                btn.click();
+            }
         });
+
+        // 尝试点击 Peak 按钮（24小时视图）
+        const peakBtn = document.querySelector('#Peak');
+        if (peakBtn) peakBtn.click();
     }
+
+    // 3. 使用定时监听（解决单页应用路由切换不触发刷新的问题）
+    let lastPath = "";
+    setInterval(() => {
+        const currentPath = window.location.pathname;
+        if (currentPath.includes('/server/') && document.querySelector('.server-info')) {
+            // 如果路径变了，或者网络视图还没出来，就执行一次
+            const networkDiv = document.querySelector('.server-info > div:nth-last-child(1)');
+            if (lastPath !== currentPath || (networkDiv && getComputedStyle(networkDiv).display === 'none')) {
+                initializeView();
+                lastPath = currentPath;
+            }
+        }
+    }, 1000);
+
 })();
