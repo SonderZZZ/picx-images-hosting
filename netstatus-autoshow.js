@@ -1,85 +1,70 @@
 // ==UserScript==
-// @name         哪吒详情页-纯净网络视图
-// @version      3.1
-// @description  基于提供的HTML结构修改：完全隐藏详情，只留网络图表
+// @name         哪吒详情页-只看网络(终极版)
+// @version      4.0
+// @description  强制隐藏详情栏，自动切换并展示网络波动图
 // @author       Gemini
 // @match        *://*/server/*
+// @grant        GM_addStyle
 // ==/UserScript==
 
 (function () {
     'use strict';
 
-    // 1. 定义基于你提供的 HTML 结构的精准选择器
-    // 整个切换栏所在的 section
-    const selectorTabSection = 'section.flex.items-center.my-2.w-full';
-    // 包含“详情”和“网络”文字的按钮
-    const selectorAllTabs = '.server-info-tab .relative.cursor-pointer';
-    // 详情图表容器（通常带有 server-charts 类）
-    const selectorDetailDiv = '.server-info > div:has(.server-charts)';
-    // 网络图表容器（通常是 server-info 下的第三个直接子 div）
-    const selectorNetworkDiv = '.server-info > div:nth-of-type(3)';
-
-    let hasClicked = false;
-
-    // 核心函数：强制控制显示隐藏
-    function applyViewCorrection() {
-        const detailDiv = document.querySelector(selectorDetailDiv);
-        const networkDiv = document.querySelector(selectorNetworkDiv);
-        const tabSection = document.querySelector(selectorTabSection);
-
-        // 隐藏“详情”图表
-        if (detailDiv) {
-            detailDiv.style.setProperty('display', 'none', 'important');
+    // 1. 【核心】注入 CSS 样式，直接从底层封杀详情栏和切换栏
+    // 使用 !important 确保 React 无法通过内联样式改回显示
+    GM_addStyle(`
+        /* 隐藏切换标签栏（包含 详情/网络 按钮的那一行） */
+        section.flex.items-center.my-2.w-full { 
+            display: none !important; 
         }
 
-        // 隐藏“切换栏” (你提供的那段 HTML)
-        if (tabSection) {
-            tabSection.style.setProperty('display', 'none', 'important');
+        /* 隐藏详情图表容器（根据你提供的 server-charts 类名锁定） */
+        div:has(> section.server-charts) {
+            display: none !important;
+            height: 0 !important;
+            overflow: hidden !important;
         }
 
-        // 确保“网络”图表显示
-        if (networkDiv) {
-            networkDiv.style.setProperty('display', 'block', 'important');
+        /* 确保网络图表容器（详情的兄弟节点）保持显示 */
+        /* 哪吒新版布局中，网络图表通常在详情图表的下一个相邻 div 中 */
+        div:has(> section.server-charts) + div {
+            display: block !important;
         }
-    }
+    `);
 
-    // 自动点击“网络”按钮
-    function switchToNetworkTab() {
-        if (hasClicked) return;
-
-        const tabs = document.querySelectorAll(selectorAllTabs);
-        tabs.forEach(tab => {
-            if (tab.textContent.includes('网络')) {
-                tab.click();
-                hasClicked = true;
-                console.log('[UserScript] 已切换至网络视图');
+    // 2. 自动点击逻辑
+    function doAutoActions() {
+        // A. 自动点击“网络”标签
+        // 我们通过文字匹配，因为 class 可能会变，但文字“网络”不会变
+        const allDivs = document.querySelectorAll('.server-info-tab div, .server-info-tab p');
+        allDivs.forEach(el => {
+            if (el.innerText === '网络' || el.innerText === 'Network') {
+                // 向上找那个带 cursor-pointer 的容器并点击
+                const btn = el.closest('.cursor-pointer');
+                if (btn) btn.click();
             }
         });
-    }
 
-    // 自动点击 Peak 按钮
-    function clickPeak() {
+        // B. 自动点击“Peak”按钮
         const peakBtn = document.querySelector('#Peak');
         if (peakBtn) peakBtn.click();
     }
 
-    // 观察器：应对 React 动态渲染
+    // 3. 监听 DOM 变化（应对单页应用切换服务器的情况）
+    let lastUrl = location.href;
     const observer = new MutationObserver(() => {
-        const serverInfo = document.querySelector('.server-info');
-        if (serverInfo) {
-            switchToNetworkTab();
-            applyViewCorrection();
-            // 延迟执行 Peak 点击，确保图表已加载
-            setTimeout(clickPeak, 500);
+        // 如果页面 URL 变了，或者检测到图表加载了
+        if (location.href !== lastUrl || document.querySelector('.server-charts')) {
+            lastUrl = location.href;
+            doAutoActions();
         }
     });
 
-    const root = document.querySelector('#root') || document.body;
-    observer.observe(root, {
-        childList: true,
-        subtree: true
-    });
+    // 开始监听
+    const targetNode = document.querySelector('#root') || document.body;
+    observer.observe(targetNode, { childList: true, subtree: true });
 
-    // 初始执行一次
-    applyViewCorrection();
+    // 初始执行
+    setTimeout(doAutoActions, 300);
+
 })();
